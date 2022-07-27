@@ -1,0 +1,1415 @@
+<html>
+    <head>
+        <title>TAF Checker</title>
+        <style>
+            body {background-color: powderblue;}
+            h1   {color: #00308f;} /* Air Force Blue */
+            p    {
+                font-size: 16px;
+            }
+            input[type=button] {
+              background-color: #c0c0c0; /* Gray */
+              border-style: outset;
+              border-width: 2px;
+              color: black;
+              padding: 15px 32px;
+              text-align: center;
+              text-decoration: none;
+              display: inline-block;
+              font-size: 16px;
+            }
+            p.banner {
+              color: red;
+              font-weight: 900;
+            }
+        </style>
+        <script>
+            /*
+                TAF CHECKER  v1.0.2 (07/11/2022) - Update version in HTML body
+                by Dan McGonigle
+                If you have an issue, message me at dpmcgonigle@gmail.com
+               
+                Example TAF
+TAF AMD KBIX 301111Z 3012/0118 12004KT 9000 TS DU VA FEW000 FEW040CB QNH2992INS VA000010 DU FEW000
+BECMG 3014/3015 12010G15KT 6000 +TSRA BKN020CB QNH2980INS
+BECMG 3023/3024 12010G15KT 9999 NSW BKN020 QNH2980INS
+TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
+            */
+       
+            /* MAIN BUTTON FUNCTIONS */
+            function validateTAF() {
+                var tafText = document.getElementById("tafText").value;
+                var tafLines = getLines(tafText);
+                var lineNo = 1;
+                var lastPredomLine = lineNo;
+                var tafErrors = []; // array of strings
+                //  Check empty lines and whitespace
+                checkEmptyLines(tafText);
+                checkExcessWhitespace(tafText);
+               
+                //  
+                tafErrors = tafErrors.concat(validateFirstLine(tafLines[0], tafLines.length));
+
+                var tafStart = getTafStart(tafLines[0]);
+                var tafEnd = getTafEnd(tafLines[0]);
+                var lastLineStart = tafStart;
+                while (lineNo < tafLines.length) {
+                    var lastLineWx = getLastPredomLineWx(tafLines[lastPredomLine-1]);
+                    lineNo++;
+                    var line = tafLines[lineNo-1];
+                    if (isProbablyBecmg(line)) {
+                        tafErrors = tafErrors.concat(validateBecmg(line, lineNo, tafLines.length, tafStart, tafEnd, lastLineStart, lastLineWx));
+                        lastPredomLine = lineNo;
+                        lastLineStart = getLineValidTime(line);
+                    } else if (isProbablyTempo(line)) {
+                        tafErrors = tafErrors.concat(validateTempo(line, lineNo, tafLines.length, tafStart, tafEnd, lastLineStart, lastLineWx));
+                        lastLineStart = getLineValidTime(line);
+                    } else {
+                        tafErrors.push("LINE " + lineNo + ": Line type not understood");
+                    }
+                }
+               
+                var msg = "";
+                if (tafErrors.length > 0) {
+                    msg = "TAF Errors: " + tafErrors.length + "\n" + tafErrors.join("\r\n");
+                    //alert(msg);
+                } else {
+                    msg = "TAF syntax looks good!";
+                    //alert(msg);
+                }
+                unHideValidation();
+                document.getElementById("validationText").innerText = msg;
+            }
+           
+            function trimWhiteSpace() {
+                var tafTextArea = document.getElementById("tafText");
+                var tafText = tafTextArea.value;
+                hideValidation();
+                var lines = getLines(tafText);
+                var newLines = [];
+                for (var index=0; index<lines.length; index++) {
+                    var line = lines[index].trim();
+                    if (line.length > 0) {
+                        newLines.push(line);
+                    }
+                }
+                tafTextArea.value = newLines.join("\r\n");
+            }
+           
+            function clearTAF() {
+                var tafTextArea = document.getElementById("tafText");
+                tafTextArea.value = "";
+                hideValidation();
+            }
+           
+            function openTAF() {
+                var icao = document.getElementById("ICAO").value;
+                var url = "https://tgftp.nws.noaa.gov/data/forecasts/taf/stations/" + icao + ".TXT";
+                hideValidation();
+                window.open(url);
+            }
+
+            /* TAF LINE VALIDATION */
+            function validateFirstLine(line, tafLength) {
+                /* TAF (AMD or COR) CCCC YYGGggZ YYG1G1/YYG2G2 dddffGfmfmKT VVVV
+                w’w’ NsNsNshshshsCC or VVhshshs or SKC (VAbbbttt) (WShxhxhx/dddfffKT)
+                (6IchihihitL) (5BhBhBhBtL) QNHP1P1P1P1INS (Remarks) */
+                var errors = [];
+                var fields = line.split(" ");
+                if (fields[0] != "TAF") {
+                    errors.push("LINE 1: Needs to start with 'TAF'");
+                }
+               
+                var fieldIndex = 1;
+                var isAmdended = false;
+                if (fields[fieldIndex] == "AMD" || fields[fieldIndex] == "COR") {
+                    fieldIndex++;
+                }
+               
+                //  Validate ICAO
+                if (outOfFields(fields, fieldIndex)) {
+                    errors.push("LINE 1: MISSING ICAO");
+                } else if (!isValidICAO(fields[fieldIndex])) {
+                    errors.push("LINE 1: INVALID ICAO");
+                }
+                fieldIndex++;
+               
+                //  Validate Issue Time
+                var issueTime = "010001Z";
+                if (outOfFields(fields, fieldIndex)) {
+                    errors.push("LINE 1: MISSING Issue Time");
+                } else if (!isValidIssueTime(fields[fieldIndex])) {
+                    errors.push("LINE 1: INVALID Issue Time");
+                }
+                issueTime = fields[fieldIndex];
+                fieldIndex++;
+               
+                //  Validate TAF Time Range
+                var isAmd = isTAFAmended(line);
+                var isCor = isTAFCord(line);
+                if (outOfFields(fields, fieldIndex)) {
+                    errors.push("LINE 1: MISSING Time Range");
+                } else if (!isValidTAFTimeRange(fields[fieldIndex], issueTime, isAmd, isCor)) {
+                    errors.push("LINE 1: INVALID Time Range");
+                }
+                var tafStart = getStartTimeFromField(fields[fieldIndex]);
+                var tafEnd = getEndTimeFromField(fields[fieldIndex]);
+                fieldIndex++;
+               
+                //  Validate Winds (FIRST LINE)
+                if (outOfFields(fields, fieldIndex)) {
+                    errors.push("LINE 1: MISSING Winds");
+                } else if (!isValidWind(fields[fieldIndex])) {
+                    errors.push("LINE 1: INVALID Winds");
+                }
+                fieldIndex++;
+               
+                //  Validate Visibility (FIRST LINE)
+                var hasThunderstorms = false;
+                var vis_meters = 9999;
+                if (outOfFields(fields, fieldIndex)) {
+                    errors.push("LINE 1: MISSING Visibility");
+                } else if (!isValidVisibility(fields[fieldIndex])) {
+                    errors.push("LINE 1: INVALID Visibility");
+                } else {
+                    vis_meters = parseInt(fields[fieldIndex]);
+                }
+                fieldIndex++;
+               
+               //   Check for / Validate Weather Groups (FIRST LINE)
+                if (outOfFields(fields, fieldIndex)) {
+                    if (vis_meters < 9999) {
+                        errors.push("LINE 1: MISSING Weather Group");
+                    }
+                    fieldIndex++;
+                //  Check for weather group; parse fields until valid skycond
+                } else if (vis_meters < 9999 && isValidSkyCond(fields[fieldIndex], hasThunderstorms)) {
+                    errors.push("LINE 1: MISSING Weather Group");
+                    fieldIndex++;
+                } else {
+                    var weatherGroups = 0;
+                    while(!isProbablySkyCond(fields[fieldIndex])) {
+                        weatherGroups++;
+                        weatherGroup = fields[fieldIndex];
+                       
+                        if (weatherGroup.includes("TS")) { hasThunderstorms = true; }
+                        if (weatherGroups > 3) {
+                            errors.push("LINE 1: Too many weather groups!");
+                        }
+                        if (weatherGroups > 1 && (weatherGroup == "FC" || weatherGroup == "+FC")) {
+                            errors.push("LINE 1: FC / +FC needs to be FIRST weather group");
+                        }
+                        if (!isValidWeatherGroup(weatherGroup)) {
+                            errors.push("LINE 1: Invalid weather group " + weatherGroup);
+                        }
+                        fieldIndex++;
+                        if (outOfFields(fields, fieldIndex)) { break; }
+                    }    
+                }
+               
+                //  Sky Condition Fields (FIRST LINE)
+                var obscurationLayer = "";
+                if (outOfFields(fields, fieldIndex)) {
+                    errors.push("LINE 1: MISSING Sky Condition");
+                    fieldIndex++;
+                } else if (!isValidSkyCond(fields[fieldIndex], hasThunderstorms)) {
+                    errors.push("LINE 1: MISSING or INCORRECT Sky Condition");
+                    fieldIndex++;
+                } else {
+                    var skyClear = false;
+                    var skyCondGroups = 0;
+                    var prevBaseHeight = -1;
+                    var prevOktas = 0;
+                    var badOktas = false;
+                    var hasThunderstormsSatisfied = false;
+                    while(isProbablySkyCond(fields[fieldIndex])) {
+                        var skyCond = fields[fieldIndex];
+                        skyCondGroups++;
+                        if (!isValidSkyCond(skyCond, hasThunderstorms)) {
+                            errors.push("LINE 1: Invalid sky condition " + skyCond);
+                        }
+                       
+                        if (getSkyCondBase(skyCond) <= prevBaseHeight) {
+                            errors.push("LINE 1: cloud base heights out of order");
+                        } else {
+                            prevBaseHeight = getSkyCondBase(skyCond);
+                            if (prevBaseHeight == 0) { obscurationLayer = skyCond;  }
+                   
+                        }
+                        if (skyCondGroups > 6) {
+                            errors.push("LINE 1: Too many sky condition groups");
+                        }
+                        if (skyCondContainsCB(skyCond)) { hasThunderstormsSatisfied = true; }
+                        switch(skyCond.substring(0,3)) {
+                            case "SKC":
+                                skyClear = true;
+                                break;
+                               
+                            case "FEW":
+                                if (prevOktas < 1) { prevOktas = 1; }
+                                else if (prevOktas < 2) { prevOktas = 2; }
+                                else { badOktas = true; }
+                                break;
+                               
+                            case "SCT":
+                                if (prevOktas < 3) { prevOktas = 3; }
+                                else if (prevOktas < 4) { prevOktas = 4; }
+                                else { badOktas = true; }
+                                break;
+                               
+                            case "BKN":
+                                if (prevOktas < 5) { prevOktas = 5; }
+                                else if (prevOktas < 6) { prevOktas = 6; }
+                                else if (prevOktas < 7) { prevOktas = 7; }
+                                else { badOktas = true; }
+                                break;
+                               
+                            case "OVC":
+                                if (prevOktas < 8) { prevOktas = 8; }
+                                else { badOktas = true; }
+                                break;
+                               
+                            case "VV":
+                                if (prevOktas != 0) { badOktas = true; }
+                                else { prevOktas = 8; }
+                                break;
+                               
+                            default:
+                                errors.push("Line 1: Error with Sky Condition " + skyCond);
+                        }
+                       
+                        if (badOktas) {
+                            errors.push("LINE 1: Bad sky conditions; count your oktas for each layer");
+                        }
+                        if (skyClear && weatherGroups > 1) {
+                            errors.push("LINE 1: Can't have SKC with other sky condition groups");
+                        }
+                        fieldIndex++;
+                        if (outOfFields(fields, fieldIndex)) { break; }
+                    }
+                    if (hasThunderstorms && !hasThunderstormsSatisfied) {
+                        errors.push("LINE 1: Missing CB from cloud groups");
+                    }
+                }
+               
+                //  Volcanic Ash         (FIRST LINE)        
+                if (!outOfFields(fields, fieldIndex) && isProbablyVolcanicAsh(fields[fieldIndex])) {
+                    if (!isValidVolcanicAsh(fields[fieldIndex])) {
+                        errors.push("LINE 1: Invalid Volcanic Ash");
+                    }
+                    fieldIndex++;
+                }
+                if (!checkVolcanicAshConsistency(fields)) {
+                    errors.push("LINE 1: Invalid Volcanic Ash consistency, need present weather group and VABBBTTT group");
+                }
+             
+                //  Wind Shear (FIRST LINE)
+                if (!outOfFields(fields, fieldIndex) && isProbablyWindShear(fields[fieldIndex])) {
+                    if (!isValidWindShear(fields[fieldIndex])) {
+                        errors.push("LINE 1: Invalid Wind Shear");
+                    }
+                    fieldIndex++;
+                }
+               
+                //  Icing (FIRST LINE)
+                if (!outOfFields(fields, fieldIndex) && isProbablyIcing(fields[fieldIndex])) {
+                    if (!isValidIcing(fields[fieldIndex])) {
+                        errors.push("LINE 1: Invalid Icing");
+                    }
+                    fieldIndex++;
+                }
+               
+                //  Turbulence (FIRST LINE)
+                if (!outOfFields(fields, fieldIndex) && isProbablyTurbulence(fields[fieldIndex])) {
+                    if (!isValidTurbulence(fields[fieldIndex])) {
+                        errors.push("LINE 1: Invalid Turbulence");
+                    }
+                    fieldIndex++;
+                }
+               
+                //  Pressure (FIRST LINE)
+                var hasPressure = false;
+                if (!outOfFields(fields, fieldIndex) && isProbablyPressure(fields[fieldIndex])) {
+                    if (!isValidPressure(fields[fieldIndex])) {
+                        errors.push("LINE 1: Invalid Pressure");
+                    }
+                    hasPressure = true;
+                    fieldIndex++;
+                }
+               
+                if (!hasPressure) {
+                    errors.push("LINE 1: Missing pressure");
+                }
+
+                var isLastLine = false;
+                if (tafLength == 1) { isLastLine = true;  }
+
+                if (outOfFields(fields, fieldIndex)) {
+                    //    NO REMARKS
+                    if (isLastLine) { errors.push("LINE 1: (REMARK) Missing max/min temp"); }
+                    if (obscurationLayer.length > 0) { errors.push("LINE 1: (REMARK) Missing obscuration remark"); }
+                } else {
+                    //    REMARKS (FIRST LINE)
+                    var remarks = fields.slice(fieldIndex, fields.length);
+                    errors = errors.concat (validateRemarks(remarks, 1, isLastLine, obscurationLayer, tafStart, tafEnd));
+                }
+               
+
+                return errors;
+            }   //    validateFirstLine
+                 
+            function isProbablyBecmg(line) {
+                if (line.substring(0,5) == "BECMG") { return true; }
+                else { return false; }
+            }
+
+            function validateBecmg(line, lineNo, tafLength, tafStart, tafEnd, lastLineStart, lastLineWx) {
+                /*
+                line (str): "BECMG 1205/1206 12004KT ..."
+                lineNo (int):
+                tafLength (int):
+                tafStart (str): "1200"
+                tafEnd (str): "1306"
+                lastLineStart (str): "1306"
+                lastLineWx (bool): whether last line had wx, which would require NSW in weather group
+
+                BECMG YYG1G1/YYG2G2 dddffGfmfmKT VVVV
+                w’w’ NsNsNshshshsCC or VVhshshs or SKC (VAbbbttt) (WShxhxhx/dddfffKT)
+                (6IchihihitL) (5BhBhBhBtL) QNHP1P1P1P1INS (Remarks) */
+                var errors = [];
+                var fields = line.split(" ");
+                var isTempo = false;
+               
+                var fieldIndex = 1;
+               
+                //  Validate LineTime Range (BECMG LINE)
+                if (outOfFields(fields, fieldIndex)) {
+                    errors.push("LINE " + lineNo + ": MISSING Time Range");
+                } else if (!isValidLineTimeRange(fields[fieldIndex], tafStart, tafEnd, lastLineStart, isTempo)) {
+                    errors.push("LINE " + lineNo + ": INVALID Time Range");
+                }
+                var lineStart = getStartTimeFromField(fields[fieldIndex]);
+                var lineEnd = getEndTimeFromField(fields[fieldIndex]);
+                fieldIndex++;
+               
+                //  Validate Winds (BECMG LINE)
+                if (outOfFields(fields, fieldIndex)) {
+                    errors.push("LINE " + lineNo + ": MISSING Winds");
+                } else if (!isValidWind(fields[fieldIndex])) {
+                    errors.push("LINE " + lineNo + ": INVALID Winds");
+                }
+                fieldIndex++;
+               
+                //  Validate Visibility (BECMG LINE)
+                var hasThunderstorms = false;
+                var vis_meters = 9999;
+                if (outOfFields(fields, fieldIndex)) {
+                    errors.push("LINE " + lineNo + ": MISSING Visibility");
+                } else if (!isValidVisibility(fields[fieldIndex])) {
+                    errors.push("LINE " + lineNo + ": INVALID Visibility");
+                } else {
+                    vis_meters = parseInt(fields[fieldIndex]);
+                }
+                fieldIndex++;
+               
+                //   Check for / Validate Weather Groups; parse fields until valid skycond
+                if (outOfFields(fields, fieldIndex)) {
+                    if (vis_meters < 9999) {
+                        errors.push("LINE " + lineNo + ": MISSING Weather Group");
+                    }
+                    fieldIndex++;
+                } else if (vis_meters < 9999 && isValidSkyCond(fields[fieldIndex], hasThunderstorms)) {
+                    errors.push("LINE " + lineNo + ": MISSING Weather Group");
+                    fieldIndex++;
+                } else if (vis_meters == 9999 && lastLineWx && isValidSkyCond(fields[fieldIndex], hasThunderstorms)) {
+                    if (fields[fieldIndex] != "NSW") {
+                        errors.push("LINE " + lineNo + ": MISSING NSW");
+                    } else { fieldIndex++; }
+                } else if (vis_meters == 9999 && lastLineWx && fields[fieldIndex] == "NSW") { 
+                    //    Good!
+                    fieldIndex++;
+                } else {
+                    var weatherGroups = 0;
+                    while(!isProbablySkyCond(fields[fieldIndex])) {
+                        weatherGroups++;
+                        weatherGroup = fields[fieldIndex];
+                        if (weatherGroup.includes("TS")) { hasThunderstorms = true; }
+                        if (weatherGroups > 3) {
+                            errors.push("LINE " + lineNo + ": Too many weather groups!");
+                        }
+                        if (weatherGroups > 1 && (weatherGroup == "FC" || weatherGroup == "+FC")) {
+                            errors.push("LINE " + lineNo + ": FC / +FC needs to be FIRST weather group");
+                        }
+                        if (!isValidWeatherGroup(weatherGroup)) {
+                            errors.push("LINE " + lineNo + ": Invalid weather group " + weatherGroup);
+                        }
+                        fieldIndex++;
+                        if (outOfFields(fields, fieldIndex)) { break; }
+                    }    
+                }
+               
+                //  Sky Condition Fields (BECMG LINE)
+                var obscurationLayer = "";
+                if (outOfFields(fields, fieldIndex)) {
+                    errors.push("LINE " + lineNo + ": MISSING Sky Condition");
+                    fieldIndex++;
+                } else if (!isValidSkyCond(fields[fieldIndex], hasThunderstorms)) {
+                    errors.push("LINE " + lineNo + ": MISSING or INCORRECT Sky Condition");
+                    fieldIndex++;
+                } else {
+                    var skyClear = false;
+                    var skyCondGroups = 0;
+                    var prevBaseHeight = -1;
+                    var prevOktas = 0;
+                    var badOktas = false;
+                    var hasThunderstormsSatisfied = false;
+                    while(isProbablySkyCond(fields[fieldIndex])) {
+                        var skyCond = fields[fieldIndex];
+                        skyCondGroups++;
+                        if (!isValidSkyCond(skyCond, hasThunderstorms)) {
+                            errors.push("LINE " + lineNo + ": Invalid sky condition " + skyCond);
+                        }
+                       
+                        if (getSkyCondBase(skyCond) <= prevBaseHeight) {
+                            errors.push("LINE " + lineNo + ": cloud base heights out of order");
+                        } else {
+                            prevBaseHeight = getSkyCondBase(skyCond);
+                            if (prevBaseHeight == 0) { obscurationLayer = skyCond;  }
+                   
+                        }
+                        if (skyCondGroups > 6) {
+                            errors.push("LINE " + lineNo + ": Too many sky condition groups");
+                        }
+                        if (skyCondContainsCB(skyCond)) { hasThunderstormsSatisfied = true; }
+                        switch(skyCond.substring(0,3)) {
+                            case "SKC":
+                                skyClear = true;
+                                break;
+                               
+                            case "FEW":
+                                if (prevOktas < 1) { prevOktas = 1; }
+                                else if (prevOktas < 2) { prevOktas = 2; }
+                                else { badOktas = true; }
+                                break;
+                               
+                            case "SCT":
+                                if (prevOktas < 3) { prevOktas = 3; }
+                                else if (prevOktas < 4) { prevOktas = 4; }
+                                else { badOktas = true; }
+                                break;
+                               
+                            case "BKN":
+                                if (prevOktas < 5) { prevOktas = 5; }
+                                else if (prevOktas < 6) { prevOktas = 6; }
+                                else if (prevOktas < 7) { prevOktas = 7; }
+                                else { badOktas = true; }
+                                break;
+                               
+                            case "OVC":
+                                if (prevOktas < 8) { prevOktas = 8; }
+                                else { badOktas = true; }
+                                break;
+                               
+                            case "VV":
+                                if (prevOktas != 0) { badOktas = true; }
+                                else { prevOktas = 8; }
+                                break;
+                               
+                            default:
+                                errors.push("Line " + lineNo + ": Error with Sky Condition " + skyCond);
+                        }
+                       
+                        if (badOktas) {
+                            errors.push("LINE " + lineNo + ": Bad sky conditions; count your oktas for each layer");
+                        }
+                        if (skyClear && weatherGroups > 1) {
+                            errors.push("LINE " + lineNo + ": Can't have SKC with other sky condition groups");
+                        }
+                        fieldIndex++;
+                        if (outOfFields(fields, fieldIndex)) { break; }
+                    }
+                    if (hasThunderstorms && !hasThunderstormsSatisfied) {
+                        errors.push("LINE " + lineNo + ": Missing CB from cloud groups");
+                    }
+                }
+               
+                //  Volcanic Ash         (BECMG LINE)        
+                if (!outOfFields(fields, fieldIndex) && isProbablyVolcanicAsh(fields[fieldIndex])) {
+                    if (!isValidVolcanicAsh(fields[fieldIndex])) {
+                        errors.push("LINE " + lineNo + ": Invalid Volcanic Ash");
+                    }
+                    fieldIndex++;
+                }
+                if (!checkVolcanicAshConsistency(fields)) {
+                    errors.push("LINE " + lineNo + ": Invalid Volcanic Ash consistency, need present weather group and VABBBTTT group");
+                }
+             
+                //  Wind Shear (BECMG LINE)
+                if (!outOfFields(fields, fieldIndex) && isProbablyWindShear(fields[fieldIndex])) {
+                    if (!isValidWindShear(fields[fieldIndex])) {
+                        errors.push("LINE " + lineNo + ": Invalid Wind Shear");
+                    }
+                    fieldIndex++;
+                }
+               
+                //  Icing (BECMG LINE)
+                if (!outOfFields(fields, fieldIndex) && isProbablyIcing(fields[fieldIndex])) {
+                    if (!isValidIcing(fields[fieldIndex])) {
+                        errors.push("LINE " + lineNo + ": Invalid Icing");
+                    }
+                    fieldIndex++;
+                }
+               
+                //  Turbulence (BECMG LINE)
+                if (!outOfFields(fields, fieldIndex) && isProbablyTurbulence(fields[fieldIndex])) {
+                    if (!isValidTurbulence(fields[fieldIndex])) {
+                        errors.push("LINE " + lineNo + ": Invalid Turbulence");
+                    }
+                    fieldIndex++;
+                }
+               
+                //  Pressure (BECMG LINE)
+                var hasPressure = false;
+                if (!outOfFields(fields, fieldIndex) && isProbablyPressure(fields[fieldIndex])) {
+                    if (!isValidPressure(fields[fieldIndex])) {
+                        errors.push("LINE " + lineNo + ": Invalid Pressure");
+                    }
+                    hasPressure = true;
+                    fieldIndex++;
+                }
+               
+                if (!hasPressure) {
+                    errors.push("LINE " + lineNo + ": Missing pressure");
+                }
+
+                var isLastLine = (lineNo == tafLength? true : false);
+                if (outOfFields(fields, fieldIndex)) {
+                    //    NO REMARKS
+                    if (isLastLine) { errors.push("LINE " + lineNo + ": (REMARK) Missing max/min temp"); }
+                    if (obscurationLayer.length > 0) { errors.push("LINE " + lineNo + ": (REMARK) Missing obscuration remark"); }
+                } else {
+                    //    REMARKS (BECMG LINE)
+                    var remarks = fields.slice(fieldIndex, fields.length);
+                    errors = errors.concat (validateRemarks(remarks, lineNo, isLastLine, obscurationLayer, tafStart, tafEnd));
+                }
+               
+                return errors;
+            }  //    END validateBecmg
+
+            function isProbablyTempo(line) {
+                if (line.substring(0,5) == "TEMPO") { return true; }
+                else { return false; }
+            }
+
+            function validateTempo(line, lineNo, tafLength, tafStart, tafEnd, lastLineStart) {
+                /*
+                line (str): TEMPO 1205/1208 6000 DU ..."
+                lineNo (int):
+                tafLength (int):
+                tafStart (str): "1200"
+                tafEnd (str): "1306"
+                lastLineStart (str): "1306"
+                lastLineWx (bool): whether last line had wx, which would require NSW in weather group
+                */
+                var errors = [];
+                var fields = line.split(" ");
+                var isTempo = true;
+               
+                var fieldIndex = 1;
+               
+                //  Validate LineTime Range (TEMPO)
+                if (outOfFields(fields, fieldIndex)) {
+                    errors.push("LINE " + lineNo + ": MISSING Time Range");
+                } else if (!isValidLineTimeRange(fields[fieldIndex], tafStart, tafEnd, lastLineStart, isTempo)) {
+                    errors.push("LINE " + lineNo + ": INVALID Time Range");
+                }
+                var lineStart = getStartTimeFromField(fields[fieldIndex]);
+                var lineEnd = getEndTimeFromField(fields[fieldIndex]);
+                fieldIndex++;
+               
+                //  Tempo criteria
+                if (outOfFields(fields, fieldIndex)) {
+                    errors.push("LINE " + lineNo + ": TEMPO NEEDS AT LEAST 1 CRITERION");
+                }
+
+                //  Validate Winds (TEMPO)
+                if (isProbablyWind(fields[fieldIndex])) {
+                    if(!isValidWind(fields[fieldIndex])) {
+                        errors.push("LINE " + lineNo + ": INVALID Winds");
+                    }
+                    fieldIndex++;
+                }
+
+                //  Validate Visibility (TEMPO)
+                var hasThunderstorms = false;
+                var vis_meters = 9999; 
+                if (!outOfFields(fields, fieldIndex) && isProbablyVisibility(fields[fieldIndex])) {
+                    if(!isValidVisibility(fields[fieldIndex])) {
+                        errors.push("LINE " + lineNo + ": INVALID Winds");
+                    } else {
+                        vis_meters = parseInt(fields[fieldIndex]);
+                    }      
+                    fieldIndex++;            
+                }
+               
+                //   Check for / Validate Weather Groups (TEMPO)
+                var weatherGroups = 0;  
+                while(!outOfFields(fields, fieldIndex) && isValidWeatherGroup(fields[fieldIndex])) {
+                    weatherGroups++;
+                    weatherGroup = fields[fieldIndex];
+                    if (weatherGroup.includes("TS")) { hasThunderstorms = true; }
+                    if (weatherGroups > 3) {
+                        errors.push("LINE " + lineNo + ": Too many weather groups!");
+                    }
+                    if (weatherGroups > 1 && (weatherGroup == "FC" || weatherGroup == "+FC")) {
+                        errors.push("LINE " + lineNo + ": FC / +FC needs to be FIRST weather group");
+                    }
+                    fieldIndex++;
+                }    
+                if (vis_meters < 9999 && weatherGroups == 0) {
+                    errors.push("LINE " + lineNo + ": Missing/incorrect weather group");
+                }    
+               
+                //  Sky Condition Fields (TEMPO)
+                var obscurationLayer = "";
+                var skyClear = false;
+                var skyCondGroups = 0;
+                var prevBaseHeight = -1;
+                var prevOktas = 0;
+                var badOktas = false;
+                var hasThunderstormsSatisfied = false;
+                while(!outOfFields(fields, fieldIndex) && isProbablySkyCond(fields[fieldIndex])) {
+                    var skyCond = fields[fieldIndex];
+                    skyCondGroups++;
+                    if (!isValidSkyCond(skyCond, hasThunderstorms)) {
+                        errors.push("LINE " + lineNo + ": Invalid sky condition " + skyCond);
+                    }
+                   
+                    if (getSkyCondBase(skyCond) <= prevBaseHeight) {
+                        errors.push("LINE " + lineNo + ": cloud base heights out of order");
+                    } else {
+                        prevBaseHeight = getSkyCondBase(skyCond);
+                        if (prevBaseHeight == 0) { obscurationLayer = skyCond;  }
+               
+                    }
+                    if (skyCondGroups > 6) {
+                        errors.push("LINE " + lineNo + ": Too many sky condition groups");
+                    }
+                    if (skyCondContainsCB(skyCond)) { hasThunderstormsSatisfied = true; }
+                    switch(skyCond.substring(0,3)) {
+                        case "SKC":
+                            skyClear = true;
+                            break;
+                               
+                        case "FEW":
+                            if (prevOktas < 1) { prevOktas = 1; }
+                            else if (prevOktas < 2) { prevOktas = 2; }
+                            else { badOktas = true; }
+                            break;
+                             
+                        case "SCT":
+                            if (prevOktas < 3) { prevOktas = 3; }
+                            else if (prevOktas < 4) { prevOktas = 4; }
+                            else { badOktas = true; }
+                            break;
+                               
+                        case "BKN":
+                            if (prevOktas < 5) { prevOktas = 5; }
+                            else if (prevOktas < 6) { prevOktas = 6; }
+                            else if (prevOktas < 7) { prevOktas = 7; }
+                            else { badOktas = true; }
+                            break;
+                               
+                        case "OVC":
+                            if (prevOktas < 8) { prevOktas = 8; }
+                            else { badOktas = true; }
+                            break;
+                             
+                        case "VV":
+                            if (prevOktas != 0) { badOktas = true; }
+                            else { prevOktas = 8; }
+                            break;
+                               
+                        default:
+                            errors.push("Line " + lineNo + ": Error with Sky Condition " + skyCond);
+                    }
+                       
+                    if (badOktas) {
+                        errors.push("LINE " + lineNo + ": Bad sky conditions; count your oktas for each layer");
+                    }
+                    if (skyClear && weatherGroups > 1) {
+                        errors.push("LINE " + lineNo + ": Can't have SKC with other sky condition groups");
+                    }
+                    fieldIndex++;
+                }
+                if (hasThunderstorms && !hasThunderstormsSatisfied) {
+                    errors.push("LINE " + lineNo + ": Missing CB from cloud groups");
+                }
+               
+                //  Volcanic Ash         (TEMPO)        
+                if (!outOfFields(fields, fieldIndex) && isProbablyVolcanicAsh(fields[fieldIndex])) {
+                    if (!isValidVolcanicAsh(fields[fieldIndex])) {
+                        errors.push("LINE " + lineNo + ": Invalid Volcanic Ash");
+                    }
+                    fieldIndex++;
+                }
+                if (!checkVolcanicAshConsistency(fields)) {
+                    errors.push("LINE " + lineNo + ": Invalid Volcanic Ash consistency, need present weather group and VABBBTTT group");
+                }
+             
+                //  Wind Shear (TEMPO)
+                if (!outOfFields(fields, fieldIndex) && isProbablyWindShear(fields[fieldIndex])) {
+                    if (!isValidWindShear(fields[fieldIndex])) {
+                        errors.push("LINE " + lineNo + ": Invalid Wind Shear");
+                    }
+                    fieldIndex++;
+                }
+               
+                //  Icing (TEMPO)
+                if (!outOfFields(fields, fieldIndex) && isProbablyIcing(fields[fieldIndex])) {
+                    if (!isValidIcing(fields[fieldIndex])) {
+                        errors.push("LINE " + lineNo + ": Invalid Icing");
+                    }
+                    fieldIndex++;
+                }
+               
+                //  Turbulence (TEMPO)
+                if (!outOfFields(fields, fieldIndex) && isProbablyTurbulence(fields[fieldIndex])) {
+                    if (!isValidTurbulence(fields[fieldIndex])) {
+                        errors.push("LINE " + lineNo + ": Invalid Turbulence");
+                    }
+                    fieldIndex++;
+                }
+
+                var isLastLine = (lineNo == tafLength? true : false);
+                if (outOfFields(fields, fieldIndex)) {
+                    //    NO REMARKS
+                    if (isLastLine) { errors.push("LINE " + lineNo + ": (REMARK) Missing max/min temp"); }
+                    if (obscurationLayer.length > 0) { errors.push("LINE " + lineNo + ": (REMARK) Missing obscuration remark"); }
+                } else {
+                    //    REMARKS
+                    var remarks = fields.slice(fieldIndex, fields.length);
+                    errors = errors.concat (validateRemarks(remarks, lineNo, isLastLine, obscurationLayer, tafStart, tafEnd));
+                }
+               
+                return errors;
+            }    //  END validateTempo
+
+            /*  TAF SYNTAX ERRORS */
+            function checkExcessWhitespace(tafText) {
+                var lines = getLines(tafText);
+                var badLines = [];
+                for(var lineIndex = 0; lineIndex < lines.length; ++lineIndex){
+                    var line = lines[lineIndex];
+                    if(line.search(/^\s|\s{2}|\s$/) >= 0) {
+                        badLines.push(lineIndex+1);
+                    }
+                }
+                if (badLines.length > 0) {
+                    alert("ERROR: Fix whitespace on lines: " + badLines.toString());
+                    throw new Error("Exiting program due to excess whitespace.");
+                }
+            }
+           
+            function checkEmptyLines(str) {
+                var lines = getLines(str);
+                if (lines.length === 0) {
+                    alert("ERROR: TAF empty!");
+                    throw new Error("Exiting program due to empty TAF.");
+                }
+                var emptyLines = [];
+                for(var lineIndex = 0; lineIndex < lines.length; ++lineIndex){
+                    var line = lines[lineIndex];
+                    if(line.trim() == "") {
+                        emptyLines.push(lineIndex+1);
+                    }
+                }
+                if (emptyLines.length > 0) {
+                    alert("ERROR: Fix empty lines: " + emptyLines.toString());
+                    throw new Error("Exiting program due to empty lines.");
+                }
+            }
+           
+            /* TAF FIELD VALIDATION */
+            function isValidICAO(icao) {
+                return (icao.search(/^[A-Z]{4}$/) == 0)
+            }
+           
+            function isValidIssueTime(issueTime) {
+                    if (issueTime.length != 7 || issueTime[6] != "Z")  {
+                        return false;
+                    } else if (!isValidDay(issueTime.substring(0,2)) || !isValidTimestamp(issueTime.substring(2,6)))  {
+                        return false;
+                    } else {
+                        return true;
+                    }
+            }
+
+            function isProbablyTimeRange(timeRange) {
+                //    RETURN TRUE IF FORMAT MATCHES TIME RANGE FORMAT
+                if (timeRange.length != 9 || timeRange[4] != "/")  {
+                    return false;
+                } else if (!isValidDayHour(timeRange.substring(0,4)) || !isValidDayHour(timeRange.substring(5,9)))  {
+                    return false;
+                } else { return true; }
+            }
+
+            function isValidTAFTimeRange(timeRange, tafIssued, isAmd, isCor) {
+                if (!isProbablyTimeRange(timeRange))  { return false; }
+                var tafStart = timeRange.substring(0,4);
+                var tafEnd = timeRange.substring(5,9);
+                if (!isValidDayHour(tafStart) || !isValidDayHour(tafEnd)) {  return false; }
+                else if (isDDHHLessThan(tafStart, addHours(tafIssued, -1)) && !isCor) {
+                    //    Issue time later than TAF valid time
+                    return false;
+                } else if (isDDHHLessThan(tafIssued, addHours(tafStart, -1))) {
+                    //    Issue time much earlier than TAF valid time
+                    return false;
+                } else if (!validHourRange(timeRange, isAmd)) {
+                    return false;
+                } else {
+                    return true;
+                }
+            }
+           
+            function isProbablyWind(wind) {
+                return wind.includes("KT");
+            }
+           
+            function isValidWind(wind) {
+                var validLengths = [7, 8, 10, 11, 12];
+                var validLength = false;
+                for (var index=0; index<validLengths.length; index++) {
+                    if (wind.length ==  validLengths[index]) { validLength = true; }
+                }
+                if (!validLength) { return false; }
+               
+                var windDir = wind.substring(0,3);
+                var windSustained = 0;
+                var windGusts = 0;
+                var isGusting = false;
+                if (wind.substring(5,6) == "G") {
+                    isGusting = true;
+                    windSustained = parseInt(wind.substring(3,5));
+                    windGusts = parseInt(wind.substring(6, wind.length-2));
+                } else if (wind.substring(6,7) == "G") {
+                    isGusting = true;
+                    windSustained = parseInt(wind.substring(3,6));
+                    windGusts = parseInt(wind.substring(7, wind.length-2));
+                } else {
+                    windSustained = parseInt(wind.substring(3,wind.length-2));
+                }
+               
+                if (windDir != "VRB") {
+                    if(isNaN(windDir)) { return false; }
+                    else if(windDir % 10 != 0) { return false; }
+                }
+                if (isNaN(windSustained) || isNaN(windGusts)) { return false; }
+                if (windSustained <= 0 || (isGusting && windGusts <= 0)) { return false; }
+                if (parseInt(windDir) > 360 || parseInt(windDir) <= 0) { return false; }
+                if (wind.substring(wind.length-2, wind.length) != "KT") { return false; }
+                return true;
+            }
+
+            function isProbablyVisibility(vis) {
+                if (vis.length != 4) { return false; }
+                else if (!isNumeric(vis)) { return false; }
+                return true;
+            }
+
+            function isValidVisibility(vis) {
+                if (isNaN(vis)) { return false; }
+                var validVisibilities = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200,
+                                         1300, 1400, 1500, 1600, 1700, 1800, 2000, 2200, 2400, 2600, 2800,
+                                         3000, 3200, 3400, 3600, 3700, 4000, 4400, 4500, 4700, 4800, 5000,
+                                         6000, 7000, 8000, 9000, 9999]
+                var validVis = false;
+                var vis_meters = parseInt(vis);
+                for (var index=0; index<validVisibilities .length; index++) {
+                    if (vis_meters ==  validVisibilities [index]) { validVis = true; }
+                }
+                if (!validVis) { return false; }
+                return true;
+            }
+
+            function isValidWeatherGroupIntensity(weatherGroup) {
+                //  TODO: Should we exclude certain weather groups from having intensities?
+                return true;
+            }
+
+            function isValidWeatherGroupVicinity(weatherGroup) {
+                var validVicinityGroups = ["TS", "SH", "FG", "BLSN", "BLDU", "BLSA", "PO", "SS", "DS"];
+                for (var index=0; index<validVicinityGroups.length; index++) {
+                    if (validVicinityGroups[index] == weatherGroup.substring(2)) { return true; }
+                }
+                return false;
+            }
+           
+            function isValidWeatherGroup(weatherGroup) {
+                if (weatherGroup.length < 2 || weatherGroup.length > 7) { return false; }
+                else if (weatherGroup.substring(0, 1) == "-" || weatherGroup.substring(0, 1) == "+") {
+                    weatherGroup = weatherGroup.substring(1);
+                    if (!isValidWeatherGroupIntensity(weatherGroup)) { return false; }
+                }
+                else if (weatherGroup.substring(0, 2) == "VC") {
+                    return isValidWeatherGroupVicinity(weatherGroup);
+                }
+                else if (weatherGroup.length % 2 != 0) { return false; }
+                //  Ensure descriptors come first
+                var descriptors = ["MI", "PR", "BC", "DR", "BL", "SH", "TS", "FZ"];
+                for (var index=0; index<descriptors.length; index++) {
+                    if (weatherGroup.includes(descriptors[index]) && weatherGroup.search(descriptors[index]) != 0) { return false; }
+                }
+                //  Ensure descriptor is attached to a weather phenomena, unless TS
+                if (descriptors.includes(weatherGroup.substring(0,2)) && weatherGroup.length == 2  && weatherGroup != "TS") { return false; }
+                var numWeatherGroups = 0;
+                var weatherGroups = ["DZ", "RA", "SN", "SG", "IC", "PL", "GR", "GS"];
+                var obscurations = ["BR", "FG", "FU", "VA", "DU", "SA", "HZ", "PY"];
+                var others = ["PO", "SQ", "FC", "SS", "DS"];
+                var all = descriptors.concat(weatherGroups, obscurations, others);
+                for (var index=0; index<weatherGroup.length; index=index+2) {
+                    if (!all.includes(weatherGroup.substring(index, index+2))) { return false; }
+                    if (weatherGroups.includes(weatherGroup.substring(index, index+2))) { numWeatherGroups++; }
+                    if (numWeatherGroups > 2) { return false; }
+                }
+                return true;
+            }
+           
+            function isProbablySkyCond(skyCond) {
+                var validCoverages = ["SKC", "FEW", "SCT", "BKN", "OVC"];
+                if (skyCond.substring(0,2) == "VV") { return true; }
+                else if (validCoverages.includes(skyCond.substring(0,3))) { return true; }
+                else { return false; }
+            }
+           
+            function isValidSkyCond(skyCond, hasThunderstorms) {
+                if (skyCond.length < 3) { return false; }
+                else if (!hasThunderstorms && skyCond.length > 6) { alert("LONG " + skyCond); return false; }
+                else if (hasThunderstorms && skyCond.length > 8) { return false; }
+                else if (skyCond == "SKC") { return true; }
+                else if (skyCond.substring(0, 2) == "VV") {
+                    if (skyCond.length != 5 || isNaN(skyCond.substring(2,5))) { return false; }
+                    var base = parseInt(skyCond.substring(2,5));
+                    if (base >= 100 && base % 10 != 0) { return false; }
+                    else if (base >= 50 && base % 5 != 0) { return false; }
+                    else { return true; }
+                } else {
+                    var validCoverages = ["FEW", "SCT", "BKN", "OVC"];
+                    if (!validCoverages.includes(skyCond.substring(0,3))) { return false; }
+                    if (skyCond.length != 6 && skyCond.length != 8) { return false; }
+                    else if (isNaN(skyCond.substring(3,6))) { return false; }
+                    var base = parseInt(skyCond.substring(3,6));
+                    if (base >= 100 && base % 10 != 0) { return false; }
+                    else if (base >= 50 && base % 5 != 0) { return false; }
+                    else { return true; }
+                }
+            }
+           
+            function isProbablyVolcanicAsh(field) {
+                return (field.substring(0,2) == "VA" && field.length > 2);
+            }
+           
+            function isValidVolcanicAsh(volcanicAsh) {
+                //    RETURN TRUE IF VALID VOLCANIC ASH REMARK; ex VAbbbttt
+                if (volcanicAsh.length != 8) { return false; }
+                if (isNaN(volcanicAsh.substring(2))) { return false; }
+                if (parseInt(volcanicAsh.substring(2,5)) > parseInt(volcanicAsh.substring(5))) { return false; }
+                return true;
+            }
+           
+            function checkVolcanicAshConsistency(fields) {
+                //    RETURN TRUE IF VA GROUP AND REMARKS ARE CONSISTENT
+                //  If VA is included, it needs to be in present weather and the VA group
+                volcanicAshCounter = 0;
+                for(var index=0; index<fields.length; index++) {
+                    if (fields[index].length > 1 && fields[index].substring(0,2) == "VA") {
+                        volcanicAshCounter++;
+                    }
+                }
+                if (volcanicAshCounter == 1) { return false; }
+                return true;
+            }
+           
+            function isProbablyWindShear(field) {
+                //    RETURN TRUE IF FIELD LOOKS LIKE WIND SHEAR GROUP (WShxhxhx/dddfffKT)
+                return (field.substring(0,2) == "WS" && field.length > 2);
+            }
+           
+            function isValidWindShear(field) {
+                //    RETURN TRUE IF VALID WIND SHEAR ; ex WS010/29035KT
+                if (field.length != 13 && field.length != 14) { return false; }
+                else if (field.substring(5,6) != "/" || field.substring(field.length-2) != "KT") { return false; }
+                else if (isNaN(field.substring(2,5))) { return false; }
+                else if (!isValidWind(field.substring(6))) { return false; }
+                return true;
+            }
+           
+            function isProbablyIcing(field) {
+                //    RETURN TRUE IF FIELD LOOKS LIKE TURBULENCE (6ibbbh)
+                return (field.substring(0,1) == "6" && field.length > 1);
+            }
+           
+            function isValidIcing(field) {
+                //    RETURN TRUE IF VALID TURBULENCE
+                if (isNaN(field.substring(1))) { return false; }
+                else if (field.length != 6) { return false; }
+                else if (parseInt(field.substring(5)) <= 0) { return false; }
+                return true;
+            }
+           
+            function isProbablyTurbulence(field) {
+                //    RETURN TRUE IF FIELD LOOKS LIKE TURBULENCE (5ibbbh)
+                return (field.substring(0,1) == "5" && field.length > 1);
+            }
+           
+            function isValidTurbulence(field) {
+                //    RETURN TRUE IF VALID TURBULENCE
+                if (isNaN(field.substring(1))) { return false; }
+                else if (field.length != 6) { return false; }
+                else if (parseInt(field.substring(5)) <= 0) { return false; }
+                return true;
+            }
+           
+            function isProbablyPressure(field) {
+                //    RETURN TRUE IF FIELD LOOKS LIKE PRESSURE (QNHPPPPINS)
+                return (field.substring(0,3) == "QNH" && field.length > 3);
+            }
+           
+            function isValidPressure(field) {
+                //    RETURN TRUE IF VALID PRESSURE
+                if (field.length != 10) { return false; }
+                else if (field.substring(field.length-3) != "INS") { return false; }
+                else if (isNaN(field.substring(3, 7))) { return false; }
+                else if (parseInt(field.substring(3,7)) < 2000 || parseInt(field.substring(3,7)) >= 4000) { return false; }
+                return true;
+            }
+
+            function validateRemarks(remarks, lineNo, isLastLine, obscurationLayer, tafStart, tafEnd) {
+                //    RETURN ERRORS FROM REMARKS
+                var errors = [];
+               
+                //    Check for temperature
+                if (isLastLine) {
+                    if (!validateTemps(remarks, tafStart, tafEnd)) { errors.push("LINE " + lineNo + ": (REMARK) MAX/MIN Temps remarks incorrect"); }
+                } else if (containsTemps(remarks)) {
+                    errors.push("LINE " + lineNo + ": (REMARK) Should not contain MAX/MIN Temps!");
+                }
+
+                //    Check for obscuration
+                if (obscurationLayer.length > 0 && !validateObscuration(remarks, obscurationLayer)) { errors.push("LINE " + lineNo + ": (REMARK) Obscuration remark incorrect"); }
+
+                return errors;
+            }
+
+
+            /* TAF FIELD VALIDATION HELPERS */
+
+            function isValidDayHour(dayHour) {
+                    if (!isValidDay(dayHour.substring(0,2)) || !isValidHour(dayHour.substring(2,4)))  {
+                        return false;
+                    } else {
+                        return true;
+                    }
+            }
+
+            function isDDHHLessThan(dayHour1, dayHour2) {
+                //    RETURN TRUE IF dayHour1 < dayHour2
+                //    Valid formats: DDHH, tafIssued: DDHHMMZ
+                var day1 = parseInt(dayHour1.substring(0,2));
+                var day2 = parseInt(dayHour2.substring(0,2));
+                var hour1 = parseInt(dayHour1.substring(2,4));
+                var hour2 = parseInt(dayHour2.substring(2,4));
+                if (day2 == 1 && day1 >= 28) { return true; }
+                else if (day2 - day1 > 2) { return false; }
+                else if (day1 < day2 && (day2 - day1 <= 1)) { return true; }
+                else if (day1 == day2 && hour1 < hour2) { return true; }
+                else { return false; }
+            }
+
+            function isValidDay(day){
+                return (day.search(/(^[0][1-9]$)|(^[1-2][0-9]$)|(^[3][0-1]$)/) == 0);
+            }
+
+            function isValidTimestamp(timestamp){
+                return (timestamp.search(/^[0-2][0-9][0-5][0-9]$/) == 0);
+            }
+
+            function isValidHour(hour){
+                return (hour.search(/(^[0-1][0-9]$)|(^[2][0-4]$)/) == 0);
+            }
+           
+            function isTAFAmended(firstLine) {
+                return (firstLine.split(" ")[1] == "AMD");
+            }
+           
+            function isTAFCord(firstLine) {
+                return (firstLine.split(" ")[1] == "COR");
+            }
+
+            function isValidLineTimeRange(field, tafStart, tafEnd, lastLineStart, isTempo) {
+                var lineStart = getStartTimeFromField(field);
+                var lineStartHour = parseInt(lineStart.substring(2,4));
+                var lineEnd = getEndTimeFromField(field);
+                var lineEndHour = parseInt(lineEnd.substring(2,4));
+                if (!isProbablyTimeRange(field)) { return false; }
+                else if (!isValidDayHour(lineStart) || !isValidDayHour(lineEnd)) { return false; }
+                else if (lineEndHour <= 0 || lineStartHour > 24) { return false; }
+                else if (!isDDHHLessThan(lineStart, lineEnd)) {  return false; }
+                else if (isDDHHLessThan(lineStart, tafStart)) { return false; }
+                else if (isDDHHLessThan(lineEnd, lastLineStart)) { return false; }
+                else if (isDDHHLessThan(tafEnd, lineEnd)) { return false; }
+                else if (!isTempo && !isDDHHLessThan(lineEnd, addHours(lineStart, 3))) { return false; }
+                else if (lineStart == lineEnd) { return false; }
+                else { return true; }
+            }
+
+            function validHourRange(timeRange, isAmd) {
+                var startDay = parseInt(timeRange.substring(0,2));
+                var startHour = parseInt(timeRange.substring(2,4));
+                var endDay = parseInt(timeRange.substring(5,7));
+                var endHour = parseInt(timeRange.substring(7,9));
+                //    End of month scenario
+                if (startDay >= 28 && endDay == 1) {
+                    if (startHour > 18) { startDay = -1; }
+                    else { startDay = 0; }
+                }
+                //    End of day scenario
+                if (endDay > startDay + 2 || endDay < startDay) { return false; }
+                if (endDay > startDay + 1 && startHour <= 18) { return false; }
+                if (endDay == startDay + 1) {
+                    endHour += 24;
+                } else if (endDay == startDay + 2) {
+                    endHour += 48;
+                }
+                var hourRange = endHour - startHour;
+                if (hourRange > 30) { return false; }
+                if (!isAmd && hourRange < 30) { return false; }
+                return true;
+            }
+           
+            function skyCondContainsCB(skyCond) {
+                return (skyCond.substring(skyCond.length-2) == "CB");
+            }
+           
+            function getSkyCondBase(skyCond) {
+                if (skyCond.substring(0,2) == "VV") {
+                    return parseInt(skyCond.substring(2, 5));
+                } else if (skyCond.substring(0,3) != "SKC") {
+                    return parseInt(skyCond.substring(3, 6));
+                } else {
+                    return 999;
+                }
+            }
+
+
+            function validateTemps(remarks, tafStart, tafEnd) {
+                //    RETURN TRUE IF MAX/MIN TEMPS REMARK CORRECT
+                var fieldIndex = 0;
+                var maxFieldIndex = -1;
+                var minFieldIndex = -1;
+                var maxTemp = -99;
+                var minTemp = 99;
+                while (fieldIndex < remarks.length) {
+                    if (remarks[fieldIndex].substring(0,2) == "TX") {
+                        //    Can't have min before max or multiple max fields
+                        if (minFieldIndex >= 0) { return false; }
+                        else if (maxFieldIndex >= 0) { return false; }
+                        else {
+                            if (!remarks[fieldIndex].includes("/")) { return false; }
+                            var maxTempField = remarks[fieldIndex].split("/")[0];
+                            if (maxTempField.includes("M")) {
+                                maxTemp = parseInt(maxTempField.substring(3));
+                                maxTemp = -maxTemp;
+                            } else { maxTemp = parseInt(maxTempField.substring(2)); }
+                            maxFieldIndex = fieldIndex;
+                            var maxTimeField = remarks[maxFieldIndex].split("/")[1];
+                            if (isDDHHLessThan(maxTimeField, tafStart) || isDDHHLessThan(tafEnd, maxTimeField)) { return false; }
+                        }
+                    } else if (remarks[fieldIndex].substring(0,2) == "TN") {
+                        //    Can't have min before max or multiple min fields
+                        if (maxFieldIndex  == -1) { return false; }
+                        else if (minFieldIndex >= 0) { return false; }
+                        else {
+                            if (!remarks[fieldIndex].includes("/")) { return false; }
+                            var minTempField = remarks[fieldIndex].split("/")[0];
+                            if (minTempField.includes("M")) {
+                                if (minTempField.substring(3).length < 2) { return false; }
+                                minTemp = parseInt(minTempField.substring(3));
+                                minTemp = -minTemp;
+                            } else {
+                                if (minTempField.substring(2).length < 2) { return false; }
+                                minTemp = parseInt(minTempField.substring(2));
+                            }
+                            minFieldIndex = fieldIndex;
+                            var minTimeField = remarks[minFieldIndex].split("/")[1];
+                            if (isDDHHLessThan(minTimeField, tafStart) || isDDHHLessThan(tafEnd, minTimeField)) { return false; }
+                        }
+                    }
+                    fieldIndex++;
+                }
+                if (maxFieldIndex >= 0 && minFieldIndex > 0 && maxTemp > minTemp) { return true; }
+                else { return false; }
+               
+            }
+
+
+            function containsTemps(remarks) {
+                //    RETURN TRUE IF REMARKS CONTAINS MAX/MIN TEMPS REMARK
+                for (var fieldIndex=0; fieldIndex < remarks.length; fieldIndex++) {
+                    if (remarks[fieldIndex].substring(0,2) == "TX") {
+                        return true;
+                    } else if (remarks[fieldIndex].substring(0,2) == "TN") {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            function validateObscuration(remarks, obscurationLayer) {
+                //    RETURN TRUE IF OBSCURATION REMARK CORRECT
+                var fieldIndex = 1;
+                while (fieldIndex < remarks.length) {
+                    if (remarks[fieldIndex] == obscurationLayer) {
+                        if (isValidWeatherGroup(remarks[fieldIndex-1], false)) { return true; }
+                    }
+                    fieldIndex++;
+                }
+                return false;
+               
+            }
+     
+           
+            /* HELPER FUNCTIONS */
+            function getLines(str) {
+                return str.split("\n");
+            }
+            function getLine(str, lineNo) {
+                return getLines(str)[lineNo-1];
+            }
+            function outOfFields(fields, fieldIndex) {
+                return (fields.length < fieldIndex + 1);
+            }
+            function addHours(dayHour, hours) {
+                //    Valid formats: DDHH, DDHHMMZ
+                var startDays = parseInt(dayHour.substring(0,2));
+                var startHours = parseInt(dayHour.substring(2,4));
+                var daysToAdd = Math.floor((startHours + hours) / 24);
+                var hoursResult = (startHours + hours) % 24;
+                var result = rjust(startDays + daysToAdd, 2, "0") + rjust(hoursResult, 2, "0");
+                if (dayHour.length > 4) { result += dayHour.substring(4); }
+                return result;
+            }
+            function getStartTimeFromField(tafRangeField) {
+                return tafRangeField.substring(0,4);
+            }
+            function getEndTimeFromField(tafRangeField) {
+                return tafRangeField.substring(5,9);
+            }
+
+            function getTafStart(line) {
+                //    TIME RANGE POSITION DEPENDS ON WHETHER TAF IS AMD OR COR
+                var fields = line.split(" ");
+                if (fields.length > 3 && isProbablyTimeRange(fields[3])) {
+                    return getStartTimeFromField(fields[3]);
+                } else if (fields.length > 4 && isProbablyTimeRange(fields[4])) {
+                    return getStartTimeFromField(fields[4]);
+                }
+                return false;
+            }
+
+            function getLineValidTime(line) {
+                //    RETURN LINE VALID TIME
+                var fields = line.split(" ");
+                if (fields.length > 1 && isProbablyTimeRange(fields[1])) {
+                    return getEndTimeFromField(fields[1]);
+                }
+                return false;
+            }
+
+
+            function getTafEnd(line) {
+                //    TIME RANGE POSITION DEPENDS ON WHETHER TAF IS AMD OR COR
+                var fields = line.split(" ");
+                if (fields.length > 3 && isProbablyTimeRange(fields[3])) {
+                    return getEndTimeFromField(fields[3]);
+                } else if (fields.length > 4 && isProbablyTimeRange(fields[4])) {
+                    return getEndTimeFromField(fields[4]);
+                }
+                return false;
+            }
+
+            function getLastPredomLineWx(line) {
+                var fields = line.split(" ");
+                var fieldsToCheck = (fields.length<8 ? fields.length-1 : 8);
+                for (var index=3; index<fieldsToCheck; index++) {
+                    if(isValidWeatherGroup(fields[index], false)) { return true; }
+                }
+                return false;
+            }
+
+            function isNumeric(num) {
+                if (num.length == 0) {return false; }
+                for (var index=0; index<num.length; index++) {
+                    if (num[index].search(/^[0-9]$/) != 0) { return false; }
+                }
+                return true;
+            }
+           
+            function hideValidation() {
+                var elements = document.getElementsByClassName("validation");
+                for (var index=0; index<elements.length; index++) {
+                    elements[index].style.visibility = "hidden";
+                }
+                document.getElementById("validationText").value = "";
+            }
+
+            function unHideValidation() {
+                var elements = document.getElementsByClassName("validation");
+                for (var index=0; index<elements.length; index++) {
+                    elements[index].style.visibility = "visible";
+                }
+            }
+           
+            function rjust(value, length, character) {
+                value = value.toString();
+                while(value.length < length) {
+                    value = character + value;
+                }
+                return value;
+            }
+           
+        </script>
+    </head>
+
+    <body onload="hideValidation()">
+        <table>
+            <tr><th><h1><center>
+                TAF Checker v1.0.2 (07/11/2022)
+                <hr>
+            </center></h1></th></tr>
+            <tr><td><center>
+                <textarea rows="20" cols="120" id = "tafText"></textarea>
+            </center></td></tr>
+            <tr><td><center>
+                <input type = "button" value="Validate TAF" onclick = "validateTAF();" />
+                <input type = "button" value="Trim Whitespace" onclick = "trimWhiteSpace();" />
+                <input type = "button" value="Clear TAF" onclick = "clearTAF();" />
+            </center></td></tr>
+            <tr><td><center>
+                <hr class="validation" id="validationHr">
+                <h1 class="validation" id="validationHeading">TAF VALIDATION</h1>
+                <p class="validation" id="validationText"></p>
+                <hr id="tafRetrievalHr">
+            <tr><td><center>
+                <h1 id="openTAFHeading">Open TAF</h1>
+                <input type = "text" value="KFCS" id="ICAO" />
+                <input type = "button" value="Open TAF" onclick = "openTAF();" />
+                <hr id="bannerHr">
+                <p class="banner">If you encounter a problem with this program, or an uncaught TAF error, please contact desmond.padilla@us.af.mil or dpmcgonigle@gmail.com.
+                <br />Ensure you provide (1)The TAF that had the issue, and (2) a description of the problem.</p>
+            </center></td></tr>
+            </center></td></tr>
+        </table>
+    </body>
+
+</html>
