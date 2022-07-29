@@ -1236,6 +1236,7 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                             } else { maxTemp = parseInt(maxTempField.substring(2)); }
                             maxFieldIndex = fieldIndex;
                             var maxTimeField = remarks[maxFieldIndex].split("/")[1];
+                            if (maxTimeField.length != 5 || !isValidDayHour(maxTimeField.substring(0,4)) ||  maxTimeField.substring(4) != "Z") {return false;}
                             if (isDDHHLessThan(maxTimeField, tafStart) || isDDHHLessThan(tafEnd, maxTimeField)) { return false; }
                         }
                     } else if (remarks[fieldIndex].substring(0,2) == "TN") {
@@ -1255,6 +1256,7 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                             }
                             minFieldIndex = fieldIndex;
                             var minTimeField = remarks[minFieldIndex].split("/")[1];
+                            if (minTimeField.length != 5 || !isValidDayHour(minTimeField.substring(0,4)) ||  minTimeField.substring(4) != "Z") {return false;}
                             if (isDDHHLessThan(minTimeField, tafStart) || isDDHHLessThan(tafEnd, minTimeField)) { return false; }
                         }
                     }
@@ -1397,7 +1399,7 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
     <body onload="hideValidation()">
         <table>
             <tr><th><h1><center>
-                TAF Checker v1.0.4 (07/29/2022)
+                TAF Checker v1.0.5 (07/29/2022)
                 <hr>
             </center></h1></th></tr>
             <tr><td><center>
