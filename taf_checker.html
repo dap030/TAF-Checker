@@ -24,11 +24,7 @@
             }
         </style>
         <script>
-            /*
-                TAF CHECKER  v1.0.2 (07/11/2022) - Update version in HTML body
-                by Dan McGonigle
-                If you have an issue, message me at dpmcgonigle@gmail.com
-               
+            /*               
                 Example TAF
 TAF AMD KBIX 301111Z 3012/0118 12004KT 9000 TS DU VA FEW000 FEW040CB QNH2992INS VA000010 DU FEW000
 BECMG 3014/3015 12010G15KT 6000 +TSRA BKN020CB QNH2980INS
@@ -876,7 +872,7 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                 return wind.includes("KT");
             }
            
-            function isValidWind(wind) {
+ 	    function isValidWind(wind) {
                 var validLengths = [7, 8, 10, 11, 12];
                 var validLength = false;
                 for (var index=0; index<validLengths.length; index++) {
@@ -890,14 +886,24 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                 var isGusting = false;
                 if (wind.substring(5,6) == "G") {
                     isGusting = true;
-                    windSustained = parseInt(wind.substring(3,5));
-                    windGusts = parseInt(wind.substring(6, wind.length-2));
+                    var sustainedString = wind.substring(3,5);
+                    var gustString = wind.substring(6, wind.length-2);
+                    if (!isNumeric(sustainedString)) { return false; }
+                    if (!isNumeric(gustString)) { return false; }
+                    windSustained = parseInt(sustainedString);
+                    windGusts = parseInt(gustString);
                 } else if (wind.substring(6,7) == "G") {
                     isGusting = true;
-                    windSustained = parseInt(wind.substring(3,6));
-                    windGusts = parseInt(wind.substring(7, wind.length-2));
+                    var sustainedString = wind.substring(3,6);
+                    var gustString = wind.substring(7, wind.length-2);
+                    if (!isNumeric(sustainedString)) { return false; }
+                    if (!isNumeric(gustString)) { return false; }
+                    windSustained = parseInt(sustainedString);
+                    windGusts = parseInt(gustString);
                 } else {
-                    windSustained = parseInt(wind.substring(3,wind.length-2));
+                    var sustainedString = wind.substring(3, wind.length-2);
+                    windSustained = parseInt(wind.substring(3, wind.length-2));
+                    if (!isNumeric(sustainedString)) { return false; }
                 }
                
                 if (windDir != "VRB") {
@@ -1384,7 +1390,7 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
     <body onload="hideValidation()">
         <table>
             <tr><th><h1><center>
-                TAF Checker v1.0.2 (07/11/2022)
+                TAF Checker v1.0.3 (07/29/2022)
                 <hr>
             </center></h1></th></tr>
             <tr><td><center>
