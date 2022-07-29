@@ -34,7 +34,11 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
        
             /* MAIN BUTTON FUNCTIONS */
             function validateTAF() {
+                trimWhiteSpace();
+                hideValidation();
                 var tafText = document.getElementById("tafText").value;
+                tafText = tafText.toUpperCase();
+                document.getElementById("tafText").value = tafText;
                 var tafLines = getLines(tafText);
                 var lineNo = 1;
                 var lastPredomLine = lineNo;
@@ -67,15 +71,15 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                
                 var msg = "";
                 if (tafErrors.length > 0) {
-                    msg = "TAF Errors: " + tafErrors.length + "\n" + tafErrors.join("\r\n");
+                    msg = "TAF Errors: " + tafErrors.length + " (" + new Date().toUTCString() + ") " + "\n" + tafErrors.join("\r\n");
                     //alert(msg);
                 } else {
-                    msg = "TAF syntax looks good!";
+                    msg = "TAF syntax looks good! (" + new Date().toUTCString() + ")";
                     //alert(msg);
                 }
                 unHideValidation();
                 document.getElementById("validationText").innerText = msg;
-            }
+            }//end validate TAF
            
             function trimWhiteSpace() {
                 var tafTextArea = document.getElementById("tafText");
@@ -85,6 +89,7 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                 var newLines = [];
                 for (var index=0; index<lines.length; index++) {
                     var line = lines[index].trim();
+                    line = line.replace(/\s{2,}/g, " ");
                     if (line.length > 0) {
                         newLines.push(line);
                     }
@@ -100,6 +105,8 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
            
             function openTAF() {
                 var icao = document.getElementById("ICAO").value;
+                icao = icao.toUpperCase();
+                document.getElementById("ICAO").value = icao;
                 var url = "https://tgftp.nws.noaa.gov/data/forecasts/taf/stations/" + icao + ".TXT";
                 hideValidation();
                 window.open(url);
@@ -886,24 +893,24 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                 var isGusting = false;
                 if (wind.substring(5,6) == "G") {
                     isGusting = true;
-                    var sustainedString = wind.substring(3,5);
-                    var gustString = wind.substring(6, wind.length-2);
-                    if (!isNumeric(sustainedString)) { return false; }
-                    if (!isNumeric(gustString)) { return false; }
+		    var sustainedString = wind.substring(3,5);
+		    var gustString = wind.substring(6, wind.length-2);
+		    if (!isNumeric(sustainedString)) { return false; }
+		    if (!isNumeric(gustString)) { return false; }
                     windSustained = parseInt(sustainedString);
                     windGusts = parseInt(gustString);
                 } else if (wind.substring(6,7) == "G") {
                     isGusting = true;
-                    var sustainedString = wind.substring(3,6);
-                    var gustString = wind.substring(7, wind.length-2);
-                    if (!isNumeric(sustainedString)) { return false; }
-                    if (!isNumeric(gustString)) { return false; }
+		    var sustainedString = wind.substring(3,6);
+		    var gustString = wind.substring(7, wind.length-2);
+		    if (!isNumeric(sustainedString)) { return false; }
+		    if (!isNumeric(gustString)) { return false; }
                     windSustained = parseInt(sustainedString);
                     windGusts = parseInt(gustString);
                 } else {
-                    var sustainedString = wind.substring(3, wind.length-2);
+		    var sustainedString = wind.substring(3, wind.length-2);
                     windSustained = parseInt(wind.substring(3, wind.length-2));
-                    if (!isNumeric(sustainedString)) { return false; }
+		    if (!isNumeric(sustainedString)) { return false; }
                 }
                
                 if (windDir != "VRB") {
@@ -1390,7 +1397,7 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
     <body onload="hideValidation()">
         <table>
             <tr><th><h1><center>
-                TAF Checker v1.0.3 (07/29/2022)
+                TAF Checker v1.0.4 (07/29/2022)
                 <hr>
             </center></h1></th></tr>
             <tr><td><center>
@@ -1398,7 +1405,7 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
             </center></td></tr>
             <tr><td><center>
                 <input type = "button" value="Validate TAF" onclick = "validateTAF();" />
-                <input type = "button" value="Trim Whitespace" onclick = "trimWhiteSpace();" />
+                <!--  <input type = "button" value="Trim Whitespace" onclick = "trimWhiteSpace();" />  -->
                 <input type = "button" value="Clear TAF" onclick = "clearTAF();" />
             </center></td></tr>
             <tr><td><center>
