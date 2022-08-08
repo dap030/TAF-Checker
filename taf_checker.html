@@ -1,3 +1,4 @@
+
 <html>
     <head>
         <title>YETI TAF Checker</title>
@@ -375,7 +376,6 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                 tafEnd (str): "1306"
                 lastLineStart (str): "1306"
                 lastLineWx (bool): whether last line had wx, which would require NSW in weather group
-
                 BECMG YYG1G1/YYG2G2 dddffGfmfmKT VVVV
                 w’w’ NsNsNshshshsCC or VVhshshs or SKC (VAbbbttt) (WShxhxhx/dddfffKT)
                 (6IchihihitL) (5BhBhBhBtL) QNHP1P1P1P1INS (Remarks) */
@@ -876,7 +876,7 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
             }
            
             function isProbablyWind(wind) {
-                return wind.includes("KT");
+                return (wind.endsWith("KT") || wind.startsWith("VRB") || isNumeric(wind.substring(0,5)));
             }
            
  	    function isValidWind(wind) {
@@ -1399,7 +1399,7 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
     <body onload="hideValidation()">
         <table>
             <tr><th><h1><center>
-                YETI TAF Checker v1.0.5 (07/29/2022)
+                YETI TAF Checker v1.0.6 (08/08/2022)
                 <hr>
             </center></h1></th></tr>
             <tr><td><center>
