@@ -1,4 +1,3 @@
-
 <html>
     <head>
         <title>YETI TAF Checker</title>
@@ -1101,11 +1100,17 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                 //    RETURN ERRORS FROM REMARKS
                 var errors = [];
                
-                //    Check for temperature
+                //    Check for last line remarks (temp, last no amds, limited metwatch)
                 if (isLastLine) {
                     if (!validateTemps(remarks, tafStart, tafEnd)) { errors.push("LINE " + lineNo + ": (REMARK) MAX/MIN Temps remarks incorrect"); }
-                } else if (containsTemps(remarks)) {
-                    errors.push("LINE " + lineNo + ": (REMARK) Should not contain MAX/MIN Temps!");
+                    if (probablyHasLastNoAmds(remarks) && !validateLastNoAmds(remarks, tafStart, tafEnd)) { errors.push("LINE " + lineNo + ": (REMARK) LAST NO AMDS Incorrect"); }
+                    if (probablyHasLimitedMetwatch(remarks) && !validateLimitedMetwatch(remarks, tafStart, tafEnd)) { errors.push("LINE " + lineNo + ": (REMARK) LIMITED METWATCH Incorrect"); }
+                } else {
+                    if (containsTemps(remarks)) {
+                        errors.push("LINE " + lineNo + ": (REMARK) Should not contain MAX/MIN Temps!");
+                    }
+                    if (probablyHasLastNoAmds(remarks)) { errors.push("LINE " + lineNo + ": (REMARK) LAST NO AMDS doesn't belong on this line!"); }
+                    if (probablyHasLimitedMetwatch(remarks)) { errors.push("LINE " + lineNo + ": (REMARK) LIMITED METWATCH doesn't belong on this line!"); }
                 }
 
                 //    Check for obscuration
@@ -1214,6 +1219,33 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                 }
             }
 
+            function validateLastNoAmds(remarks, tafStart, tafEnd) {
+                if (remarks.join(" ").search(/LAST NO AMDS AFT \d{4} NEXT \d{4}/) == -1) { return false;}
+                var start = remarks[remarks.length-3];
+                var end = remarks[remarks.length-1];
+                if (!isValidDayHour(start) || !isValidDayHour(end)) { return false; }
+                if (isDDHHLessThan(start, tafStart) || isDDHHLessThan(tafEnd, start)) { return false; }
+		if (!isDDHHLessThan(start, end)) { return false; }
+                return true;
+            }
+
+            function probablyHasLastNoAmds(remarks) {
+                return (remarks.join(" ").toLowerCase().includes("last no "));
+            }
+
+            function validateLimitedMetwatch(remarks, tafStart, tafEnd) {
+                if (remarks.join(" ").search(/LIMITED METWATCH \d{4} TIL \d{4}/) == -1) { return false;}
+                var start = remarks[remarks.length-3];
+                var end = remarks[remarks.length-1];
+                if (!isValidDayHour(start) || !isValidDayHour(end)) { return false; }
+                if (isDDHHLessThan(start, tafStart) || isDDHHLessThan(tafEnd, start)) { return false; }
+                if (!isDDHHLessThan(start, end)) { return false; }
+                return true;
+            }
+
+            function probablyHasLimitedMetwatch(remarks) {
+                return (remarks.join(" ").toLowerCase().includes("limited metwatch"));
+            }
 
             function validateTemps(remarks, tafStart, tafEnd) {
                 //    RETURN TRUE IF MAX/MIN TEMPS REMARK CORRECT
@@ -1399,7 +1431,7 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
     <body onload="hideValidation()">
         <table>
             <tr><th><h1><center>
-                YETI TAF Checker v1.0.6 (08/08/2022)
+                YETI TAF Checker v1.0.7 (08/24/2022)
                 <hr>
             </center></h1></th></tr>
             <tr><td><center>
