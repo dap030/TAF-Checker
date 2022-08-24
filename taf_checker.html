@@ -1,4 +1,3 @@
-
 <html>
     <head>
         <title>YETI TAF Checker</title>
@@ -1226,11 +1225,12 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                 var end = remarks[remarks.length-1];
                 if (!isValidDayHour(start) || !isValidDayHour(end)) { return false; }
                 if (isDDHHLessThan(start, tafStart) || isDDHHLessThan(tafEnd, start)) { return false; }
+		if (!isDDHHLessThan(start, end)) { return false; }
                 return true;
             }
 
             function probablyHasLastNoAmds(remarks) {
-                return (remarks.join(" ").toLowerCase().includes("last no amds"));
+                return (remarks.join(" ").toLowerCase().includes("last no "));
             }
 
             function validateLimitedMetwatch(remarks, tafStart, tafEnd) {
@@ -1239,7 +1239,6 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                 var end = remarks[remarks.length-1];
                 if (!isValidDayHour(start) || !isValidDayHour(end)) { return false; }
                 if (isDDHHLessThan(start, tafStart) || isDDHHLessThan(tafEnd, start)) { return false; }
-                if (isDDHHLessThan(end, tafStart) || isDDHHLessThan(tafEnd, end)) { return false; }
                 if (!isDDHHLessThan(start, end)) { return false; }
                 return true;
             }
@@ -1432,7 +1431,7 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
     <body onload="hideValidation()">
         <table>
             <tr><th><h1><center>
-                YETI TAF Checker v1.0.6 (08/08/2022)
+                YETI TAF Checker v1.0.7 (08/24/2022)
                 <hr>
             </center></h1></th></tr>
             <tr><td><center>
