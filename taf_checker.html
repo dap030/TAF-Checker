@@ -60,10 +60,14 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                     if (isProbablyBecmg(line)) {
                         tafErrors = tafErrors.concat(validateBecmg(line, lineNo, tafLines.length, tafStart, tafEnd, lastLineStart, lastLineWx));
                         lastPredomLine = lineNo;
-                        lastLineStart = getLineValidTime(line);
+                        if (lineHasValidTimeRange(line, tafStart, tafEnd, lastLineStart, false)) {
+                            lastLineStart = getLineValidTime(line);
+                        }
                     } else if (isProbablyTempo(line)) {
                         tafErrors = tafErrors.concat(validateTempo(line, lineNo, tafLines.length, tafStart, tafEnd, lastLineStart, lastLineWx));
-                        lastLineStart = getLineValidTime(line);
+                        if (lineHasValidTimeRange(line, tafStart, tafEnd, lastLineStart, true)) {
+                            lastLineStart = getLineValidTime(line);
+                        }
                     } else {
                         tafErrors.push("LINE " + lineNo + ": Line type not understood");
                     }
@@ -875,7 +879,7 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
             }
            
             function isProbablyWind(wind) {
-                return (wind.endsWith("KT") || wind.startsWith("VRB") || isNumeric(wind.substring(0,5)));
+                return (wind.endsWith("KT") && (wind.startsWith("VRB") || isNumeric(wind.substring(0,5))));
             }
            
  	    function isValidWind(wind) {
@@ -1164,12 +1168,18 @@ TEMPO 0102/0108 4000 BLDU TXM05/0113Z TNM06/0114Z
                 return (firstLine.split(" ")[1] == "COR");
             }
 
+            function lineHasValidTimeRange(line, tafStart, tafEnd, lastLineStart, isTempo) {
+                fields = line.split(" ");
+                return isValidLineTimeRange(fields[1], tafStart, tafEnd, lastLineStart, isTempo);
+            }
+
             function isValidLineTimeRange(field, tafStart, tafEnd, lastLineStart, isTempo) {
                 var lineStart = getStartTimeFromField(field);
                 var lineStartHour = parseInt(lineStart.substring(2,4));
                 var lineEnd = getEndTimeFromField(field);
                 var lineEndHour = parseInt(lineEnd.substring(2,4));
-                if (!isProbablyTimeRange(field)) { return false; }
+                if (field.length != 9 || field.substring(4,5) != "/") { return false; }
+                else if (!isProbablyTimeRange(field)) { return false; }
                 else if (!isValidDayHour(lineStart) || !isValidDayHour(lineEnd)) { return false; }
                 else if (lineEndHour <= 0 || lineStartHour > 24) { return false; }
                 else if (!isDDHHLessThan(lineStart, lineEnd)) {  return false; }
